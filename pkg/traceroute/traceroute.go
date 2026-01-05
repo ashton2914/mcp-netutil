@@ -1,6 +1,7 @@
 package traceroute
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
@@ -9,7 +10,7 @@ import (
 )
 
 // Run executes the traceroute command for a given target.
-func Run(target string) (string, error) {
+func Run(ctx context.Context, target string) (string, error) {
 	// Basic validation to prevent command injection
 	if err := validateTarget(target); err != nil {
 		return "", fmt.Errorf("invalid target: %w", err)
@@ -20,16 +21,20 @@ func Run(target string) (string, error) {
 	case "windows":
 		// -w: Timeout in milliseconds
 		// -h: Maximum hops
-		cmd = exec.Command("tracert", "-w", "1000", "-h", "20", target)
+		cmd = exec.CommandContext(ctx, "tracert", "-w", "1000", "-h", "20", target)
 	default:
 		// -w: Wait time in seconds
 		// -q: Number of queries per hop
 		// -m: Max hops
-		cmd = exec.Command("traceroute", "-w", "1", "-q", "1", "-m", "20", target)
+		cmd = exec.CommandContext(ctx, "traceroute", "-w", "1", "-q", "1", "-m", "20", target)
 	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// Check if it was a context error
+		if ctx.Err() == context.DeadlineExceeded {
+			return string(output), fmt.Errorf("traceroute timed out: %w", err)
+		}
 		return string(output), fmt.Errorf("traceroute failed: %w", err)
 	}
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -213,9 +214,24 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Process in background to not block the POST request
 	go func() {
-		resp := handleRequest(&req)
-		if resp != nil {
-			session.MsgChan <- resp
+		// 10 second timeout for the request
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		resultChan := make(chan *JSONRPCResponse, 1)
+
+		go func() {
+			resultChan <- handleRequest(ctx, &req)
+		}()
+
+		select {
+		case resp := <-resultChan:
+			if resp != nil {
+				session.MsgChan <- resp
+			}
+		case <-ctx.Done():
+			errResp := errorResponse(req.ID, -32000, "Request timed out after 10s")
+			session.MsgChan <- errResp
 		}
 	}()
 }
@@ -234,7 +250,10 @@ func serveStdio() {
 			continue
 		}
 
-		resp := handleRequest(&req)
+		// Stdio mode also gets simple timeout handling, though stdio is typically synchronous
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		resp := handleRequest(ctx, &req)
+		cancel()
 		if resp != nil {
 			if err := encoder.Encode(resp); err != nil {
 				log.Printf("Error encoding response: %v", err)
@@ -249,7 +268,7 @@ func generateID() string {
 	return hex.EncodeToString(b)
 }
 
-func handleRequest(req *JSONRPCRequest) *JSONRPCResponse {
+func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 	switch req.Method {
 	case "initialize":
 		return &JSONRPCResponse{
@@ -315,7 +334,7 @@ func handleRequest(req *JSONRPCRequest) *JSONRPCResponse {
 			}
 		}
 
-		output, err := traceroute.Run(target)
+		output, err := traceroute.Run(ctx, target)
 		if err != nil {
 			return &JSONRPCResponse{
 				JSONRPC: "2.0",
