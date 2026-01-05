@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ashton2914/mcp-traceroute/pkg/traceroute"
+	"github.com/ashton2914/mcp-netutil/pkg/traceroute"
 )
 
 // JSON-RPC Request/Response structures
@@ -261,7 +261,7 @@ func handleRequest(req *JSONRPCRequest) *JSONRPCResponse {
 					"tools": map[string]interface{}{},
 				},
 				"serverInfo": map[string]string{
-					"name":    "mcp-traceroute",
+					"name":    "mcp-netutil",
 					"version": "0.1.0",
 				},
 			},
