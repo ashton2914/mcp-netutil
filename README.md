@@ -20,6 +20,7 @@ Recommend runing under user mode and use systemd user mode to control it
 mkdir -p ~/mcp/share/mcp-netutil/ && \
 cd ~/mcp/ && \
 wget -O mcp-netutil https://github.com/ashton2914/mcp-netutil/releases/latest/download/mcp-netutil-linux-amd64 && \
+chmod +x mcp-netutil && \
 cd -
 ```
 
