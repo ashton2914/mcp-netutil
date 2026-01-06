@@ -1,11 +1,34 @@
 # mcp-netutil
 
-## How to use
+## Run
+
+```
+./mcp-netutil [FLAG] [PARAMETER]
+```
+
+FLAG
+- `-a` listen address
+- `-p` listen port
+- `-D` Enable cache and define cache directory
+
+
+## Deploy on your server
+
+Recommend runing under user mode and use systemd user mode to control it
+
+```bash
+mkdir -p ~/mcp/share/mcp-netutil/ && \
+cd ~/mcp/ && \
+wget -O mcp-netutil https://github.com/ashton2914/mcp-netutil/releases/latest/download/mcp-netutil-linux-amd64 && \
+cd -
+```
 
 ```bash
 mkdir -p ~/.config/systemd/user/ && \
 nano ~/.config/systemd/user/mcp-netutil.service
 ```
+
+paste below content
 
 ```ini
 [Unit]
@@ -36,6 +59,8 @@ journalctl --user -u mcp-netutil -f
 
 ## Nginx 
 
+Please use https if you deploy on public server. Recommended Nginx config
+
 ```conf
 server {
     location / {
@@ -43,15 +68,10 @@ server {
         proxy_http_version 1.1;
         proxy_buffering off;
         proxy_cache off;
-        proxy_set_header Connection "";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Accept-Encoding "";
-        proxy_method $request_method;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
+        chunked_transfer_encoding on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 300;
     }
 }
 ```
