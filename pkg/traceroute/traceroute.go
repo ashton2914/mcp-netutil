@@ -19,14 +19,24 @@ func Run(ctx context.Context, target string) (string, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		// -w: Timeout in milliseconds
-		// -h: Maximum hops
-		cmd = exec.CommandContext(ctx, "tracert", "-w", "1000", "-h", "20", target)
+		// -d: Do not resolve addresses to hostnames (faster)
+		// -w: Timeout in milliseconds (reduced to 500ms)
+		// -h: Maximum hops (kept at 20)
+		cmd = exec.CommandContext(ctx, "tracert", "-d", "-w", "500", "-h", "20", target)
+	case "darwin":
+		// macOS traceroute
+		// -n: Do not resolve IP addresses to hostnames
+		// -w: Wait time in seconds (must be int/float depending on version, 1 is safe)
+		// -q: Number of queries per hop
+		// -m: Max hops
+		cmd = exec.CommandContext(ctx, "traceroute", "-n", "-w", "1", "-q", "1", "-m", "20", target)
 	default:
+		// Linux/Unix
+		// -n: Do not resolve IP addresses to hostnames
 		// -w: Wait time in seconds
 		// -q: Number of queries per hop
 		// -m: Max hops
-		cmd = exec.CommandContext(ctx, "traceroute", "-w", "1", "-q", "1", "-m", "20", target)
+		cmd = exec.CommandContext(ctx, "traceroute", "-n", "-w", "1", "-q", "1", "-m", "20", target)
 	}
 
 	output, err := cmd.CombinedOutput()

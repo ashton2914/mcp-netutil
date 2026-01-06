@@ -292,7 +292,7 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 				},
 				"serverInfo": map[string]string{
 					"name":    "mcp-netutil",
-					"version": "0.1.3",
+					"version": "0.1.4",
 				},
 			},
 		}

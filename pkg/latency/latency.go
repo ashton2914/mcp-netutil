@@ -31,24 +31,23 @@ func Run(ctx context.Context, target string, mode string) (interface{}, error) {
 		return "Invalid mode. Please specify: 'quick' or 'standard'.", nil
 	}
 
-	// -c count
-	// -i 0.2 (interval 200ms to speed up)
-	// -q (quiet output, only summary)
-	args := []string{"-c", count, "-i", "0.2", "-q", target}
-
-	// Adjust for Windows if necessary, but user is on Linux.
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		// Windows ping is different, but strict requirement "User's OS version is linux"
-		return nil, fmt.Errorf("windows not supported for this tool yet")
+		// Windows: -n count, -w timeout (ms)
+		// We'll set a reasonable timeout per reply, e.g., 1000ms
+		args := []string{"-n", count, "-w", "1000", target}
+		cmd = exec.CommandContext(ctx, "ping", args...)
+	} else {
+		// Linux/macOS: -c count, -i interval (0.2s), -q quiet
+		args := []string{"-c", count, "-i", "0.2", "-q", target}
+		cmd = exec.CommandContext(ctx, "ping", args...)
 	}
 
-	cmd := exec.CommandContext(ctx, "ping", args...)
 	outputBytes, err := cmd.CombinedOutput()
 	output := string(outputBytes)
 	if err != nil {
-		// ping returns non-zero if there is any packet loss or timeout, but we still want the stats if available.
-		// However, combined output might contain "unknown host" or similar.
-		// We try to parse anyway if we got output.
+		// ping returns non-zero if there is any packet loss or timeout.
+		// We still try to parse statistics if some packets were received.
 		if len(output) == 0 {
 			return nil, fmt.Errorf("ping failed: %w", err)
 		}
@@ -60,41 +59,46 @@ func Run(ctx context.Context, target string, mode string) (interface{}, error) {
 func parsePingOutput(output string, mode string) (LatencyResult, error) {
 	result := LatencyResult{}
 
-	// Parse Packet Loss
-	// Example: "10 packets transmitted, 10 received, 0% packet loss, time 2002ms"
-	lossRegex := regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
-	lossMatch := lossRegex.FindStringSubmatch(output)
-	if len(lossMatch) > 1 {
-		result.PacketLoss = lossMatch[1] + "%"
+	// --- Packet Loss Parsing ---
+	// Linux/macOS: "X% packet loss"
+	// Windows: "Lost = X (Y% loss)"
+	lossRegexUnix := regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
+	lossRegexWin := regexp.MustCompile(`\((\d+)% loss\)`)
+
+	if match := lossRegexUnix.FindStringSubmatch(output); len(match) > 1 {
+		result.PacketLoss = match[1] + "%"
+	} else if match := lossRegexWin.FindStringSubmatch(output); len(match) > 1 {
+		result.PacketLoss = match[1] + "%"
 	}
 
-	// Parse RTT (min/avg/max/mdev)
-	// Example: "rtt min/avg/max/mdev = 14.123/14.567/15.890/0.987 ms"
-	rttRegex := regexp.MustCompile(`rtt min/avg/max/mdev = ([0-9.]+)/([0-9.]+)/([0-9.]+)/([0-9.]+) ms`)
-	rttMatch := rttRegex.FindStringSubmatch(output)
+	// --- Latency Parsing ---
+	// Linux: "rtt min/avg/max/mdev = 14.123/14.567/15.890/0.987 ms"
+	// macOS: "round-trip min/avg/max/stddev = 14.123/14.567/15.890/0.987 ms"
+	// Windows: "Minimum = 14ms, Maximum = 16ms, Average = 15ms"
 
-	if len(rttMatch) > 4 {
-		// rttMatch[1] = min
-		// rttMatch[2] = avg
-		// rttMatch[3] = max
-		// rttMatch[4] = mdev (jitter)
+	// Unified Unix Regex (handles 'rtt' and 'round-trip', 'mdev' and 'stddev')
+	rttRegexUnix := regexp.MustCompile(`(?:rtt|round-trip) min/avg/max/(?:mdev|stddev) = ([0-9.]+)/([0-9.]+)/([0-9.]+)/([0-9.]+) ms`)
+	// Windows Regex
+	rttRegexWin := regexp.MustCompile(`Minimum = (\d+)ms, Maximum = (\d+)ms, Average = (\d+)ms`)
 
-		result.AvgLatency = rttMatch[2] + " ms"
-
+	if match := rttRegexUnix.FindStringSubmatch(output); len(match) > 4 {
+		// match[1]=min, match[2]=avg, match[3]=max, match[4]=dev
+		result.AvgLatency = match[2] + " ms"
 		if mode != "quick" {
-			result.Jitter = rttMatch[4] + " ms"
+			result.Jitter = match[4] + " ms"
+		}
+	} else if match := rttRegexWin.FindStringSubmatch(output); len(match) > 3 {
+		// match[1]=min, match[2]=max, match[3]=avg
+		result.AvgLatency = match[3] + " ms"
+		if mode != "quick" {
+			// Windows ping doesn't provide jitter (stddev) directly.
+			// We could convert min/max to integers and estimate, but better to leave empty or "N/A"
+			result.Jitter = "N/A"
 		}
 	} else {
-		// If we couldn't parse RTT but we have 100% packet loss, return that
+		// Failure to parse latency
+		// If 100% packet loss, AvgLatency might not be present.
 		if result.PacketLoss == "100%" {
-			// If mode is standard or full, we return the packet loss.
-			// Even in quick mode, if it's 100% loss, we probably should report it or at least not fail with "parse error".
-			// But the struct for quick mode only has AvgLatency usually?
-			// The current struct definition has PacketLoss as omitempty.
-			// If we return just PacketLoss, that's valid useful info.
-
-			// For consistency, let's explicitly set fields to indicate failure if needed,
-			// but simply returning the result (which has PacketLoss set) is enough.
 			return result, nil
 		}
 		return result, fmt.Errorf("could not parse ping statistics")

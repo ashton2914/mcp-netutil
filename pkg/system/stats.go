@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -58,8 +59,14 @@ func GetStats(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to get memory stats: %w", err)
 	}
 
-	// Disk Usage for root "/"
-	dUsage, err := disk.UsageWithContext(ctx, "/")
+	// Disk Usage
+	// Windows uses "C:\", Unix/Linux/macOS uses "/"
+	diskPath := "/"
+	if runtime.GOOS == "windows" {
+		diskPath = "C:\\"
+	}
+
+	dUsage, err := disk.UsageWithContext(ctx, diskPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to get disk usage: %w", err)
 	}
