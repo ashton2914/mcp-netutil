@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ashton2914/mcp-netutil/pkg/latency"
 	"github.com/ashton2914/mcp-netutil/pkg/system"
 	"github.com/ashton2914/mcp-netutil/pkg/traceroute"
 )
@@ -215,8 +216,8 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Process in background to not block the POST request
 	go func() {
-		// 10 second timeout for the request
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// 300 second timeout for the request (5 minutes) to allow for long running tools like latency_check
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 		defer cancel()
 
 		resultChan := make(chan *JSONRPCResponse, 1)
@@ -231,7 +232,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 				session.MsgChan <- resp
 			}
 		case <-ctx.Done():
-			errResp := errorResponse(req.ID, -32000, "Request timed out after 10s")
+			errResp := errorResponse(req.ID, -32000, "Request timed out after 300s")
 			session.MsgChan <- errResp
 		}
 	}()
@@ -252,7 +253,7 @@ func serveStdio() {
 		}
 
 		// Stdio mode also gets simple timeout handling, though stdio is typically synchronous
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 		resp := handleRequest(ctx, &req)
 		cancel()
 		if resp != nil {
@@ -316,6 +317,24 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 							Properties: map[string]Property{},
 						},
 					},
+					{
+						Name:        "latency_check",
+						Description: "Check latency and packet loss to a target",
+						InputSchema: Schema{
+							Type: "object",
+							Properties: map[string]Property{
+								"target": {
+									Type:        "string",
+									Description: "The target IP address or hostname",
+								},
+								"mode": {
+									Type:        "string",
+									Description: "Test mode: 'quick' (10 pkts) or 'standard' (100 pkts)",
+								},
+							},
+							Required: []string{"target"},
+						},
+					},
 				},
 			},
 		}
@@ -337,6 +356,62 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 						},
 						IsError: true,
 					},
+				}
+			}
+
+			return &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: CallToolResult{
+					Content: []Content{
+						{Type: "text", Text: output},
+					},
+				},
+			}
+		}
+
+		if params.Name == "latency_check" {
+			target, ok := params.Arguments["target"]
+			if !ok || target == "" {
+				return &JSONRPCResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: CallToolResult{
+						Content: []Content{
+							{Type: "text", Text: "Error: Missing target argument"},
+						},
+						IsError: true,
+					},
+				}
+			}
+
+			mode := params.Arguments["mode"]
+			// Run handles the empty mode or invalid mode logic by returning a string message
+			result, err := latency.Run(ctx, target, mode)
+			if err != nil {
+				return &JSONRPCResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: CallToolResult{
+						Content: []Content{
+							{Type: "text", Text: fmt.Sprintf("Latency check failed: %v", err)},
+						},
+						IsError: true,
+					},
+				}
+			}
+
+			// If result is string, it's a message (like "Please specify mode")
+			// If result is struct/map, marshal it to JSON
+			var output string
+			if s, ok := result.(string); ok {
+				output = s
+			} else {
+				jsonBytes, err := json.MarshalIndent(result, "", "  ")
+				if err != nil {
+					output = fmt.Sprintf("Error marshaling result: %v", err)
+				} else {
+					output = string(jsonBytes)
 				}
 			}
 
