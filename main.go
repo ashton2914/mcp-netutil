@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ashton2914/mcp-netutil/pkg/system"
 	"github.com/ashton2914/mcp-netutil/pkg/traceroute"
 )
 
@@ -281,7 +282,7 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 				},
 				"serverInfo": map[string]string{
 					"name":    "mcp-netutil",
-					"version": "0.1.1",
+					"version": "0.1.2",
 				},
 			},
 		}
@@ -307,6 +308,14 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 							Required: []string{"target"},
 						},
 					},
+					{
+						Name:        "system_stats",
+						Description: "Get system statistics (CPU, Memory, Disk)",
+						InputSchema: Schema{
+							Type:       "object",
+							Properties: map[string]Property{},
+						},
+					},
 				},
 			},
 		}
@@ -314,6 +323,32 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 		var params CallToolParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return errorResponse(req.ID, -32700, "Parse error")
+		}
+
+		if params.Name == "system_stats" {
+			output, err := system.GetStats(ctx)
+			if err != nil {
+				return &JSONRPCResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: CallToolResult{
+						Content: []Content{
+							{Type: "text", Text: fmt.Sprintf("Failed to get system stats: %v", err)},
+						},
+						IsError: true,
+					},
+				}
+			}
+
+			return &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: CallToolResult{
+					Content: []Content{
+						{Type: "text", Text: output},
+					},
+				},
+			}
 		}
 
 		if params.Name != "traceroute" {
