@@ -2,7 +2,10 @@ module github.com/ashton2914/mcp-netutil
 
 go 1.25.5
 
-require github.com/shirou/gopsutil/v4 v4.25.12
+require (
+	github.com/mattn/go-sqlite3 v1.14.33
+	github.com/shirou/gopsutil/v4 v4.25.12
+)
 
 require (
 	github.com/ebitengine/purego v0.9.1 // indirect

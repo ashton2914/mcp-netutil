@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ashton2914/mcp-netutil/pkg/cache"
 	"github.com/ashton2914/mcp-netutil/pkg/latency"
 	"github.com/ashton2914/mcp-netutil/pkg/system"
 	"github.com/ashton2914/mcp-netutil/pkg/traceroute"
@@ -91,10 +92,18 @@ var (
 func main() {
 	addr := flag.String("a", "0.0.0.0", "Address to bind to (e.g., 0.0.0.0)")
 	port := flag.Int("p", 0, "Port to listen on (0 for Stdio mode)")
+	dbDir := flag.String("D", "", "Directory to store execution records (e.g. /home/user/mcp/share/mcp-netutil)")
 	flag.Parse()
 
 	// Set log output to stderr
 	log.SetOutput(os.Stderr)
+
+	if *dbDir != "" {
+		if err := cache.Init(*dbDir); err != nil {
+			log.Fatalf("Failed to initialize database: %v", err)
+		}
+		log.Printf("Database initialized at %s", *dbDir)
+	}
 
 	if *port > 0 {
 		startSSEServer(*addr, *port)
@@ -277,13 +286,13 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: map[string]interface{}{
-				"protocolVersion": "2024-11-05",
+				"protocolVersion": "2024-11-05", // Updated 2024-11-05
 				"capabilities": map[string]interface{}{
 					"tools": map[string]interface{}{},
 				},
 				"serverInfo": map[string]string{
 					"name":    "mcp-netutil",
-					"version": "0.1.2",
+					"version": "0.1.3",
 				},
 			},
 		}
@@ -335,6 +344,32 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 							Required: []string{"target"},
 						},
 					},
+					{
+						Name:        "read_records",
+						Description: "Read execution records from the database. Time format must be YYYYMMDDhhmmss.",
+						InputSchema: Schema{
+							Type: "object",
+							Properties: map[string]Property{
+								"tool": {
+									Type:        "string",
+									Description: "Tool name to query (latency, traceroute, system_stats)",
+								},
+								"start_time": {
+									Type:        "string",
+									Description: "Start time (YYYYMMDDhhmmss) for filtering",
+								},
+								"end_time": {
+									Type:        "string",
+									Description: "End time (YYYYMMDDhhmmss) for filtering",
+								},
+								"target": {
+									Type:        "string",
+									Description: "Target host to filter by (for latency and traceroute)",
+								},
+							},
+							Required: []string{"tool"},
+						},
+					},
 				},
 			},
 		}
@@ -347,62 +382,29 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 		if params.Name == "system_stats" {
 			output, err := system.GetStats(ctx)
 			if err != nil {
-				return &JSONRPCResponse{
-					JSONRPC: "2.0",
-					ID:      req.ID,
-					Result: CallToolResult{
-						Content: []Content{
-							{Type: "text", Text: fmt.Sprintf("Failed to get system stats: %v", err)},
-						},
-						IsError: true,
-					},
-				}
+				return createErrorResponse(req.ID, fmt.Sprintf("Failed to get system stats: %v", err))
 			}
 
-			return &JSONRPCResponse{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Result: CallToolResult{
-					Content: []Content{
-						{Type: "text", Text: output},
-					},
-				},
+			// Record stats
+			if err := cache.RecordSystemStats(output); err != nil {
+				log.Printf("Failed to record system stats: %v", err)
 			}
+
+			return createSuccessResponse(req.ID, output)
 		}
 
 		if params.Name == "latency_check" {
 			target, ok := params.Arguments["target"]
 			if !ok || target == "" {
-				return &JSONRPCResponse{
-					JSONRPC: "2.0",
-					ID:      req.ID,
-					Result: CallToolResult{
-						Content: []Content{
-							{Type: "text", Text: "Error: Missing target argument"},
-						},
-						IsError: true,
-					},
-				}
+				return createErrorResponse(req.ID, "Error: Missing target argument")
 			}
 
 			mode := params.Arguments["mode"]
-			// Run handles the empty mode or invalid mode logic by returning a string message
 			result, err := latency.Run(ctx, target, mode)
 			if err != nil {
-				return &JSONRPCResponse{
-					JSONRPC: "2.0",
-					ID:      req.ID,
-					Result: CallToolResult{
-						Content: []Content{
-							{Type: "text", Text: fmt.Sprintf("Latency check failed: %v", err)},
-						},
-						IsError: true,
-					},
-				}
+				return createErrorResponse(req.ID, fmt.Sprintf("Latency check failed: %v", err))
 			}
 
-			// If result is string, it's a message (like "Please specify mode")
-			// If result is struct/map, marshal it to JSON
 			var output string
 			if s, ok := result.(string); ok {
 				output = s
@@ -415,60 +417,84 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 				}
 			}
 
-			return &JSONRPCResponse{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Result: CallToolResult{
-					Content: []Content{
-						{Type: "text", Text: output},
-					},
-				},
+			// Record latency result
+			if err := cache.RecordLatency(target, mode, output); err != nil {
+				log.Printf("Failed to record latency: %v", err)
 			}
+
+			return createSuccessResponse(req.ID, output)
 		}
 
-		if params.Name != "traceroute" {
-			return errorResponse(req.ID, -32601, "Tool not found")
-		}
-
-		target, ok := params.Arguments["target"]
-		if !ok || target == "" {
-			return &JSONRPCResponse{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Result: CallToolResult{
-					Content: []Content{
-						{Type: "text", Text: "Error: Missing target argument"},
-					},
-					IsError: true,
-				},
+		if params.Name == "traceroute" {
+			target, ok := params.Arguments["target"]
+			if !ok || target == "" {
+				return createErrorResponse(req.ID, "Error: Missing target argument")
 			}
-		}
 
-		output, err := traceroute.Run(ctx, target)
-		if err != nil {
-			return &JSONRPCResponse{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Result: CallToolResult{
-					Content: []Content{
-						{Type: "text", Text: fmt.Sprintf("Traceroute execution failed: %v\nOutput:\n%s", err, output)},
-					},
-					IsError: true,
-				},
+			output, err := traceroute.Run(ctx, target)
+			if err != nil {
+				return createErrorResponse(req.ID, fmt.Sprintf("Traceroute execution failed: %v\nOutput:\n%s", err, output))
 			}
+
+			// Record traceroute result
+			if err := cache.RecordTraceroute(target, output); err != nil {
+				log.Printf("Failed to record traceroute: %v", err)
+			}
+
+			return createSuccessResponse(req.ID, output)
 		}
 
-		return &JSONRPCResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Result: CallToolResult{
-				Content: []Content{
-					{Type: "text", Text: output},
-				},
-			},
+		if params.Name == "read_records" {
+			tool := params.Arguments["tool"]
+			if tool == "" {
+				return createErrorResponse(req.ID, "Error: Missing tool argument")
+			}
+			startTime := params.Arguments["start_time"]
+			endTime := params.Arguments["end_time"]
+			target := params.Arguments["target"]
+
+			records, err := cache.QueryRecords(tool, startTime, endTime, target)
+			if err != nil {
+				return createErrorResponse(req.ID, fmt.Sprintf("Failed to query records: %v", err))
+			}
+
+			jsonBytes, err := json.MarshalIndent(records, "", "  ")
+			if err != nil {
+				return createErrorResponse(req.ID, fmt.Sprintf("Error marshaling records: %v", err))
+			}
+
+			return createSuccessResponse(req.ID, string(jsonBytes))
 		}
+
+		return errorResponse(req.ID, -32601, "Tool not found")
+
 	default:
 		return errorResponse(req.ID, -32601, "Method not found")
+	}
+}
+
+func createSuccessResponse(id interface{}, output string) *JSONRPCResponse {
+	return &JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: CallToolResult{
+			Content: []Content{
+				{Type: "text", Text: output},
+			},
+		},
+	}
+}
+
+func createErrorResponse(id interface{}, message string) *JSONRPCResponse {
+	return &JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: CallToolResult{
+			Content: []Content{
+				{Type: "text", Text: message},
+			},
+			IsError: true,
+		},
 	}
 }
 
