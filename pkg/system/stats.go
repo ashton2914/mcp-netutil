@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -13,9 +14,12 @@ import (
 )
 
 type SystemStats struct {
-	CPU    CPUStats    `json:"cpu"`
-	Memory MemoryStats `json:"memory"`
-	Disk   DiskStats   `json:"disk"`
+	CPU             CPUStats       `json:"cpu"`
+	Memory          MemoryStats    `json:"memory"`
+	Disk            DiskStats      `json:"disk"`
+	TopCPUProcesses []ProcessInfo  `json:"top_cpu_processes,omitempty"`
+	TopMemProcesses []ProcessInfo  `json:"top_mem_processes,omitempty"`
+	Network         []NetworkStats `json:"network,omitempty"`
 }
 
 type CPUStats struct {
@@ -35,23 +39,67 @@ type DiskStats struct {
 	UsedPercent float64 `json:"used_percent"`
 }
 
-// GetStats collects system statistics including CPU, Memory, and Disk usage
+// GetStats collects system statistics including CPU, Memory, Disk usage, top processes and network usage
 func GetStats(ctx context.Context) (string, error) {
-	// CPU Usage (Total percentage)
-	// interval of 0 means use the time since the last call or system boot, but gopsutil recommends at least a small interval for accurate instant reading if not continuously polling.
-	// However, for a one-off tool call, we might need a small duration to measure 'current' load, or 0 for "since last call".
-	// If 0 is used for the first time, it might return 0 or error on some systems, or the average since boot.
-	// A small sleep like 100ms or 1s is often needed for accurate "current" CPU usage.
-	// We will use 500ms which offers a balance between responsiveness and accuracy.
-	cpuPercent, err := cpu.PercentWithContext(ctx, 500*time.Millisecond, false)
-	if err != nil {
-		return "", fmt.Errorf("failed to get cpu stats: %w", err)
+	// We need to collect stats that require a duration (CPU process, Network) in parallel
+	// to minimize total latency.
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	var (
+		cpuUsage       float64
+		cpuErr         error
+		topCPU, topMem []ProcessInfo
+		procErr        error
+		netStats       []NetworkStats
+		netErr         error
+		scanDuration   = 5 * time.Second
+	)
+
+	// 1. Overall System CPU Usage (5s)
+	go func() {
+		defer wg.Done()
+		// Use 5s to match the process scan duration for consistency
+		cpuPercent, err := cpu.PercentWithContext(ctx, scanDuration, false)
+		if err != nil {
+			cpuErr = err
+			return
+		}
+		if len(cpuPercent) > 0 {
+			cpuUsage = cpuPercent[0]
+		}
+	}()
+
+	// 2. Top Processes (5s)
+	go func() {
+		defer wg.Done()
+		topCPU, topMem, procErr = GetProcessStats(scanDuration)
+	}()
+
+	// 3. Network Usage (5s)
+	go func() {
+		defer wg.Done()
+		netStats, netErr = GetNetworkUsage(scanDuration)
+	}()
+
+	// Wait for all duration-based checks
+	wg.Wait()
+
+	// Check for errors in critical parts (logging them might be better than failing all?)
+	// For now, if comprehensive info fails, we return error.
+	if cpuErr != nil {
+		return "", fmt.Errorf("failed to get cpu stats: %w", cpuErr)
+	}
+	if procErr != nil {
+		// Non-critical, just log or ignore?
+		// The prompt implies we *should* have it. Let's return error if it fails significantly.
+		return "", fmt.Errorf("failed to get process stats: %w", procErr)
+	}
+	if netErr != nil {
+		return "", fmt.Errorf("failed to get network stats: %w", netErr)
 	}
 
-	var cpuUsage float64
-	if len(cpuPercent) > 0 {
-		cpuUsage = cpuPercent[0]
-	}
+	// Instantaneous Checks (Memory, Disk)
 
 	// Virtual Memory
 	vMem, err := mem.VirtualMemoryWithContext(ctx)
@@ -86,6 +134,9 @@ func GetStats(ctx context.Context) (string, error) {
 			Free:        dUsage.Free,
 			UsedPercent: dUsage.UsedPercent,
 		},
+		TopCPUProcesses: topCPU,
+		TopMemProcesses: topMem,
+		Network:         netStats,
 	}
 
 	jsonData, err := json.MarshalIndent(stats, "", "  ")

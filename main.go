@@ -370,6 +370,23 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 							Required: []string{"tool"},
 						},
 					},
+					{
+						Name:        "kill_process",
+						Description: "Terminate a process by PID or Name",
+						InputSchema: Schema{
+							Type: "object",
+							Properties: map[string]Property{
+								"pid": {
+									Type:        "integer",
+									Description: "Process ID to terminate",
+								},
+								"name": {
+									Type:        "string",
+									Description: "Process name to terminate (kills all matches)",
+								},
+							},
+						},
+					},
 				},
 			},
 		}
@@ -464,6 +481,42 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 			}
 
 			return createSuccessResponse(req.ID, string(jsonBytes))
+		}
+
+		if params.Name == "kill_process" {
+			var pid int
+			var name string
+
+			// Parse PID (handle string or number from JSON)
+			if p, ok := params.Arguments["pid"]; ok && p != "" {
+				// Arguments are map[string]string in CallToolParams?
+				// Wait, the CallToolParams struct defines Arguments as map[string]string.
+				// But InputSchema says integer. Clients might send stringified integer.
+				// Let's assume standard string parsing.
+				fmt.Sscanf(p, "%d", &pid)
+			}
+
+			if n, ok := params.Arguments["name"]; ok {
+				name = n
+			}
+
+			if pid == 0 && name == "" {
+				return createErrorResponse(req.ID, "Error: Must provide 'pid' or 'name'")
+			}
+
+			if pid != 0 {
+				if err := system.KillProcess(int32(pid)); err != nil {
+					return createErrorResponse(req.ID, fmt.Sprintf("Failed to kill process %d: %v", pid, err))
+				}
+				return createSuccessResponse(req.ID, fmt.Sprintf("Successfully killed process %d", pid))
+			}
+
+			if name != "" {
+				if err := system.KillProcessByName(name); err != nil {
+					return createErrorResponse(req.ID, fmt.Sprintf("Failed to kill process '%s': %v", name, err))
+				}
+				return createSuccessResponse(req.ID, fmt.Sprintf("Successfully killed process(es) named '%s'", name))
+			}
 		}
 
 		return errorResponse(req.ID, -32601, "Tool not found")
