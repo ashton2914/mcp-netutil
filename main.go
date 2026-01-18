@@ -63,8 +63,8 @@ type ListToolsResult struct {
 }
 
 type CallToolParams struct {
-	Name      string            `json:"name"`
-	Arguments map[string]string `json:"arguments"`
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
 }
 
 type CallToolResult struct {
@@ -372,7 +372,7 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 					},
 					{
 						Name:        "kill_process",
-						Description: "Terminate a process by PID or Name",
+						Description: "Terminate a process by PID. The AI Agent must resolve the process name to a PID (e.g., using system_stats) before calling this.",
 						InputSchema: Schema{
 							Type: "object",
 							Properties: map[string]Property{
@@ -380,11 +380,8 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 									Type:        "integer",
 									Description: "Process ID to terminate",
 								},
-								"name": {
-									Type:        "string",
-									Description: "Process name to terminate (kills all matches)",
-								},
 							},
+							Required: []string{"pid"},
 						},
 					},
 				},
@@ -411,12 +408,12 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 		}
 
 		if params.Name == "latency_check" {
-			target, ok := params.Arguments["target"]
-			if !ok || target == "" {
+			target := getStringArg(params.Arguments, "target")
+			if target == "" {
 				return createErrorResponse(req.ID, "Error: Missing target argument")
 			}
 
-			mode := params.Arguments["mode"]
+			mode := getStringArg(params.Arguments, "mode")
 			result, err := latency.Run(ctx, target, mode)
 			if err != nil {
 				return createErrorResponse(req.ID, fmt.Sprintf("Latency check failed: %v", err))
@@ -443,8 +440,8 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 		}
 
 		if params.Name == "traceroute" {
-			target, ok := params.Arguments["target"]
-			if !ok || target == "" {
+			target := getStringArg(params.Arguments, "target")
+			if target == "" {
 				return createErrorResponse(req.ID, "Error: Missing target argument")
 			}
 
@@ -462,13 +459,13 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 		}
 
 		if params.Name == "read_records" {
-			tool := params.Arguments["tool"]
+			tool := getStringArg(params.Arguments, "tool")
 			if tool == "" {
 				return createErrorResponse(req.ID, "Error: Missing tool argument")
 			}
-			startTime := params.Arguments["start_time"]
-			endTime := params.Arguments["end_time"]
-			target := params.Arguments["target"]
+			startTime := getStringArg(params.Arguments, "start_time")
+			endTime := getStringArg(params.Arguments, "end_time")
+			target := getStringArg(params.Arguments, "target")
 
 			records, err := cache.QueryRecords(tool, startTime, endTime, target)
 			if err != nil {
@@ -485,38 +482,27 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 
 		if params.Name == "kill_process" {
 			var pid int
-			var name string
-
-			// Parse PID (handle string or number from JSON)
-			if p, ok := params.Arguments["pid"]; ok && p != "" {
-				// Arguments are map[string]string in CallToolParams?
-				// Wait, the CallToolParams struct defines Arguments as map[string]string.
-				// But InputSchema says integer. Clients might send stringified integer.
-				// Let's assume standard string parsing.
-				fmt.Sscanf(p, "%d", &pid)
-			}
-
-			if n, ok := params.Arguments["name"]; ok {
-				name = n
-			}
-
-			if pid == 0 && name == "" {
-				return createErrorResponse(req.ID, "Error: Must provide 'pid' or 'name'")
-			}
-
-			if pid != 0 {
-				if err := system.KillProcess(int32(pid)); err != nil {
-					return createErrorResponse(req.ID, fmt.Sprintf("Failed to kill process %d: %v", pid, err))
+			
+			// Extract PID. JSON numbers are float64 in interface{}
+			if p, ok := params.Arguments["pid"]; ok {
+				switch v := p.(type) {
+				case float64:
+					pid = int(v)
+				case string:
+					fmt.Sscanf(v, "%d", &pid)
+				case int: // unlikely from JSON unmarshal into interface{}, but safe to handle
+					pid = v
 				}
-				return createSuccessResponse(req.ID, fmt.Sprintf("Successfully killed process %d", pid))
 			}
 
-			if name != "" {
-				if err := system.KillProcessByName(name); err != nil {
-					return createErrorResponse(req.ID, fmt.Sprintf("Failed to kill process '%s': %v", name, err))
-				}
-				return createSuccessResponse(req.ID, fmt.Sprintf("Successfully killed process(es) named '%s'", name))
+			if pid == 0 {
+				return createErrorResponse(req.ID, "Error: Must provide valid 'pid'")
 			}
+
+			if err := system.KillProcess(int32(pid)); err != nil {
+				return createErrorResponse(req.ID, fmt.Sprintf("Failed to kill process %d: %v", pid, err))
+			}
+			return createSuccessResponse(req.ID, fmt.Sprintf("Successfully killed process %d", pid))
 		}
 
 		return errorResponse(req.ID, -32601, "Tool not found")
@@ -524,6 +510,17 @@ func handleRequest(ctx context.Context, req *JSONRPCRequest) *JSONRPCResponse {
 	default:
 		return errorResponse(req.ID, -32601, "Method not found")
 	}
+}
+
+// getStringArg safely extracts a string argument from the map
+func getStringArg(args map[string]interface{}, key string) string {
+	if val, ok := args[key]; ok {
+		if s, ok := val.(string); ok {
+			return s
+		}
+		// Fallback for numbers sent as strings if needed, but not common for "target" etc.
+	}
+	return ""
 }
 
 func createSuccessResponse(id interface{}, output string) *JSONRPCResponse {

@@ -23,4 +23,4 @@ This programe only runs on user mode (no root requirement) and should ensure no 
     - [x] Network Interface Usage
     - [x] Disk Usage
 - [x] System Management
-    - [x] `pkill` process by CMD or PID
+    - [x] `pkill` process by PID (Name resolution via Agent)
