@@ -108,7 +108,7 @@ func (s *Server) handleInitialize(id interface{}) *JSONRPCResponse {
 			},
 			"serverInfo": map[string]string{
 				"name":    "mcp-netutil",
-				"version": "0.1.7",
+				"version": "0.1.8",
 			},
 		},
 	}

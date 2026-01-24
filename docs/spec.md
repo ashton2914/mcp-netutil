@@ -30,8 +30,11 @@ This program requires root privileges to run (e.g., must be run with `sudo`) to 
     - [x] System Control
         - [x] `pkill` process by PID (Name resolution via Agent)
 - [x] `systemd`
-    - [x] Manage systemctl, providing several control options including enable, disable, stop, start, restart, and reload.
+    - [x] Manage systemctl, providing several control options including enable, disable, stop, start, status, restart, and reload.
     - [x] View the journalctl logs for a specific systemctl process, user can optionally specify the number of recent log entries to display; the default is 100.entries for analysis.
+    - [x] List Server
+        - [x] View all services that have been loaded into memory (Loaded Units) by systemd in the current system.
+        - [x] View "all" installed services (Installed Files) by systemd in the current system.
 - [x] `traceroute`
     - [x] Traceroute
 - [x] `diagnostics`

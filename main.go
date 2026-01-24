@@ -220,24 +220,59 @@ func main() {
 			"type": "object",
 			"properties": {
 				"unit": { "type": "string", "description": "Systemd unit name" },
-				"action": { "type": "string", "description": "Action to perform: start, stop, restart, reload, enable, disable" }
+				"action": { "type": "string", "description": "Action to perform: start, stop, restart, reload, enable, disable, status" }
 			},
 			"required": ["unit", "action"]
 		}`), func(args map[string]interface{}) (mcp.CallToolResult, error) {
 		unit, _ := args["unit"].(string)
 		action, _ := args["action"].(string)
 
-		err := systemd.ControlService(unit, action)
+		output, err := systemd.ControlService(unit, action)
 		if err != nil {
-			return mcp.CallToolResult{IsError: true, Content: []mcp.ToolContent{{Type: "text", Text: err.Error()}}}, nil
+			// output might contain partial output even on error
+			return mcp.CallToolResult{IsError: true, Content: []mcp.ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v\nOutput: %s", err, output)}}}, nil
 		}
 
-		resultMsg := fmt.Sprintf("Successfully executed '%s' on service '%s'", action, unit)
+		resultMsg := fmt.Sprintf("Successfully executed '%s' on service '%s'\nOutput:\n%s", action, unit, output)
 
 		// Record to cache
 		_ = mcp_cache.SaveRecord("manage_service", resultMsg)
 
 		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: resultMsg}}}, nil
+	})
+
+	// --- systemd_list_units ---
+	server.RegisterTool("systemd_list_units", "List all loaded systemd units (services)", json.RawMessage(`{
+			"type": "object",
+			"properties": {},
+			"required": []
+		}`), func(args map[string]interface{}) (mcp.CallToolResult, error) {
+		res, err := systemd.ListUnits()
+		if err != nil {
+			return mcp.CallToolResult{IsError: true, Content: []mcp.ToolContent{{Type: "text", Text: err.Error()}}}, nil
+		}
+
+		// Record to cache
+		_ = mcp_cache.SaveRecord("systemd_list_units", res)
+
+		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: res}}}, nil
+	})
+
+	// --- systemd_list_unit_files ---
+	server.RegisterTool("systemd_list_unit_files", "List all installed systemd unit files", json.RawMessage(`{
+			"type": "object",
+			"properties": {},
+			"required": []
+		}`), func(args map[string]interface{}) (mcp.CallToolResult, error) {
+		res, err := systemd.ListUnitFiles()
+		if err != nil {
+			return mcp.CallToolResult{IsError: true, Content: []mcp.ToolContent{{Type: "text", Text: err.Error()}}}, nil
+		}
+
+		// Record to cache
+		_ = mcp_cache.SaveRecord("systemd_list_unit_files", res)
+
+		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: res}}}, nil
 	})
 
 	// --- system_diagnostics ---
