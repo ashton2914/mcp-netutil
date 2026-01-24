@@ -17,7 +17,7 @@ type JSONRPCResponse struct {
 	JSONRPC string        `json:"jsonrpc"`
 	Result  interface{}   `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
-	ID      interface{}   `json:"id"`
+	ID      interface{}   `json:"id,omitempty"`
 }
 
 type JSONRPCError struct {
@@ -72,7 +72,12 @@ func (s *Server) RegisterTool(name string, description string, schema json.RawMe
 	}
 }
 
-func (s *Server) HandleRequest(req JSONRPCRequest) JSONRPCResponse {
+func (s *Server) HandleRequest(req JSONRPCRequest) *JSONRPCResponse {
+	// 1. Handle Notifications (no ID) - JSON-RPC 2.0 says do not reply
+	if req.ID == nil {
+		return nil
+	}
+
 	switch req.Method {
 	case "tools/list":
 		return s.handleListTools(req.ID)
@@ -80,11 +85,8 @@ func (s *Server) HandleRequest(req JSONRPCRequest) JSONRPCResponse {
 		return s.handleCallTool(req.ID, req.Params)
 	case "initialize":
 		return s.handleInitialize(req.ID)
-	case "notifications/initialized":
-		// Just ignore
-		return JSONRPCResponse{JSONRPC: "2.0", ID: req.ID}
 	default:
-		return JSONRPCResponse{
+		return &JSONRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Error: &JSONRPCError{
@@ -95,8 +97,8 @@ func (s *Server) HandleRequest(req JSONRPCRequest) JSONRPCResponse {
 	}
 }
 
-func (s *Server) handleInitialize(id interface{}) JSONRPCResponse {
-	return JSONRPCResponse{
+func (s *Server) handleInitialize(id interface{}) *JSONRPCResponse {
+	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Result: map[string]interface{}{
@@ -106,19 +108,19 @@ func (s *Server) handleInitialize(id interface{}) JSONRPCResponse {
 			},
 			"serverInfo": map[string]string{
 				"name":    "mcp-netutil",
-				"version": "0.1.6",
+				"version": "0.1.7",
 			},
 		},
 	}
 }
 
-func (s *Server) handleListTools(id interface{}) JSONRPCResponse {
+func (s *Server) handleListTools(id interface{}) *JSONRPCResponse {
 	var toolsList []Tool
 	for _, t := range s.tools {
 		toolsList = append(toolsList, t.Definition)
 	}
 
-	return JSONRPCResponse{
+	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Result: map[string]interface{}{
@@ -127,13 +129,13 @@ func (s *Server) handleListTools(id interface{}) JSONRPCResponse {
 	}
 }
 
-func (s *Server) handleCallTool(id interface{}, params json.RawMessage) JSONRPCResponse {
+func (s *Server) handleCallTool(id interface{}, params json.RawMessage) *JSONRPCResponse {
 	var callParams struct {
 		Name      string                 `json:"name"`
 		Arguments map[string]interface{} `json:"arguments"`
 	}
 	if err := json.Unmarshal(params, &callParams); err != nil {
-		return JSONRPCResponse{
+		return &JSONRPCResponse{
 			JSONRPC: "2.0",
 			ID:      id,
 			Error:   &JSONRPCError{Code: -32700, Message: "Parse error"},
@@ -142,7 +144,7 @@ func (s *Server) handleCallTool(id interface{}, params json.RawMessage) JSONRPCR
 
 	tool, ok := s.tools[callParams.Name]
 	if !ok {
-		return JSONRPCResponse{
+		return &JSONRPCResponse{
 			JSONRPC: "2.0",
 			ID:      id,
 			Error:   &JSONRPCError{Code: -32601, Message: fmt.Sprintf("Tool %s not found", callParams.Name)},
@@ -151,14 +153,14 @@ func (s *Server) handleCallTool(id interface{}, params json.RawMessage) JSONRPCR
 
 	result, err := tool.Handler(callParams.Arguments)
 	if err != nil {
-		return JSONRPCResponse{
+		return &JSONRPCResponse{
 			JSONRPC: "2.0",
 			ID:      id,
 			Error:   &JSONRPCError{Code: -32000, Message: err.Error()},
 		}
 	}
 
-	return JSONRPCResponse{
+	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Result:  result,

@@ -284,6 +284,9 @@ func startStdioServer(server *mcp.Server) {
 		}
 
 		resp := server.HandleRequest(req)
+		if resp == nil {
+			continue
+		}
 
 		if enableDebugLog {
 			log.Printf("[DEBUG] Stdio Response: %+v", resp)
@@ -409,10 +412,12 @@ func startSSEServer(server *mcp.Server, addr, port string) {
 		// Handle asynchronously
 		go func() {
 			resp := server.HandleRequest(req)
-			if enableDebugLog {
-				log.Printf("[DEBUG] HTTP POST /message Response: %+v", resp)
+			if resp != nil {
+				if enableDebugLog {
+					log.Printf("[DEBUG] HTTP POST /message Response: %+v", resp)
+				}
+				sessionMgr.Broadcast(*resp)
 			}
-			sessionMgr.Broadcast(resp)
 		}()
 
 		w.WriteHeader(http.StatusAccepted)
