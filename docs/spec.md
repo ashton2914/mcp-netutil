@@ -12,20 +12,28 @@ This program requires root privileges to run (e.g., must be run with `sudo`) to 
 
 ## Current Features
 
-- [x] Ping
-- [x] Traceroute
-- [x] System Stats
-    - [x] System Info
-    - [x] CPU Usage
-    - [x] PID of most CPU usage process (highest top10 CPU usage over a 5-second interval)
-    - [x] Memory Usage
-    - [x] PID of most memory usage process (highest top10)
-    - [x] Network Interface Usage
+- [x] `cache`
+    - [x] Query Records: Read records from `cache.db` based on time or time range provided by user, when user start query `timestamp` is required items, `tool_name` is optional.
+- [x] `letency`
+    - [x] Ping
+- [x] `port`
     - [x] Port usage status (via `ss` command)
-    - [x] Disk Usage
-- [x] System Management
-    - [x] `pkill` process by PID (Name resolution via Agent)
-- [ ] Query Records: Read records from `cache.db` based on time or time range provided by user, when user start query `timestamp` is required items, `tool_name` is optional.
+- [x] `system`
+    - [x] System Stats
+        - [x] System Info
+        - [x] CPU Usage
+        - [x] PID of most CPU usage process (highest top10 CPU usage over a 5-second interval)
+        - [x] Memory Usage
+        - [x] PID of most memory usage process (highest top10)
+        - [x] Network Interface Usage
+        - [x] Disk Usage
+    - [x] System Control
+        - [x] `pkill` process by PID (Name resolution via Agent)
+- [x] `systemd`
+    - [x] Manage systemctl, providing several control options including enable, disable, stop, start, restart, and reload.
+    - [x] View the journalctl logs for a specific systemctl process, user can optionally specify the number of recent log entries to display; the default is 100.entries for analysis.
+- [x] `traceroute`
+    - [x] Traceroute
 
 ## Cache
 

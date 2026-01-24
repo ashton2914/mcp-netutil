@@ -18,6 +18,7 @@ import (
 	"github.com/ashton2914/mcp-netutil/pkg/mcp"
 	"github.com/ashton2914/mcp-netutil/pkg/port"
 	"github.com/ashton2914/mcp-netutil/pkg/system"
+	"github.com/ashton2914/mcp-netutil/pkg/systemd"
 	"github.com/ashton2914/mcp-netutil/pkg/traceroute"
 )
 
@@ -179,6 +180,63 @@ func main() {
 
 		jsonBytes, _ := json.MarshalIndent(records, "", "  ")
 		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: string(jsonBytes)}}}, nil
+	})
+
+	// --- systemd_logs ---
+	server.RegisterTool("systemd_logs", "View the journalctl logs for a specific unit (default last 100 lines)", json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"unit": { "type": "string", "description": "Systemd unit name (e.g. ssh, nginx)" },
+				"lines": { "type": "integer", "description": "Number of lines to retrieve (default 100)" }
+			},
+			"required": ["unit"]
+		}`), func(args map[string]interface{}) (mcp.CallToolResult, error) {
+		unit, _ := args["unit"].(string)
+		lines := 0
+		if l, ok := args["lines"].(float64); ok {
+			lines = int(l)
+		}
+
+		logs, err := systemd.GetJournalLogs(unit, lines)
+		if err != nil {
+			return mcp.CallToolResult{IsError: true, Content: []mcp.ToolContent{{Type: "text", Text: err.Error()}}}, nil
+		}
+
+		// Join logs for display
+		logContent := ""
+		for _, line := range logs {
+			logContent += line + "\n"
+		}
+
+		// Record to cache (maybe truncate if too large?)
+		_ = mcp_cache.SaveRecord("systemd_logs", logContent)
+
+		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: logContent}}}, nil
+	})
+
+	// --- manage_service ---
+	server.RegisterTool("manage_service", "Manage systemd services", json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"unit": { "type": "string", "description": "Systemd unit name" },
+				"action": { "type": "string", "description": "Action to perform: start, stop, restart, reload, enable, disable" }
+			},
+			"required": ["unit", "action"]
+		}`), func(args map[string]interface{}) (mcp.CallToolResult, error) {
+		unit, _ := args["unit"].(string)
+		action, _ := args["action"].(string)
+
+		err := systemd.ControlService(unit, action)
+		if err != nil {
+			return mcp.CallToolResult{IsError: true, Content: []mcp.ToolContent{{Type: "text", Text: err.Error()}}}, nil
+		}
+
+		resultMsg := fmt.Sprintf("Successfully executed '%s' on service '%s'", action, unit)
+
+		// Record to cache
+		_ = mcp_cache.SaveRecord("manage_service", resultMsg)
+
+		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: resultMsg}}}, nil
 	})
 
 	// 5. Start Server
