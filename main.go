@@ -14,6 +14,7 @@ import (
 	"time"
 
 	mcp_cache "github.com/ashton2914/mcp-netutil/pkg/cache"
+	"github.com/ashton2914/mcp-netutil/pkg/diagnostics"
 	"github.com/ashton2914/mcp-netutil/pkg/latency"
 	"github.com/ashton2914/mcp-netutil/pkg/mcp"
 	"github.com/ashton2914/mcp-netutil/pkg/port"
@@ -237,6 +238,26 @@ func main() {
 		_ = mcp_cache.SaveRecord("manage_service", resultMsg)
 
 		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: resultMsg}}}, nil
+	})
+
+	// --- system_diagnostics ---
+	server.RegisterTool("system_diagnostics", "Get system diagnostics (logs, dmesg, login history)", json.RawMessage(`{
+			"type": "object",
+			"properties": {},
+			"required": []
+		}`), func(args map[string]interface{}) (mcp.CallToolResult, error) {
+		res, err := diagnostics.RunDiagnostics()
+		if err != nil {
+			return mcp.CallToolResult{IsError: true, Content: []mcp.ToolContent{{Type: "text", Text: err.Error()}}}, nil
+		}
+
+		jsonBytes, _ := json.MarshalIndent(res, "", "  ")
+		resultStr := string(jsonBytes)
+
+		// Record to cache
+		_ = mcp_cache.SaveRecord("system_diagnostics", resultStr)
+
+		return mcp.CallToolResult{Content: []mcp.ToolContent{{Type: "text", Text: resultStr}}}, nil
 	})
 
 	// 5. Start Server

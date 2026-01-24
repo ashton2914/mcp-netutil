@@ -34,7 +34,12 @@ This program requires root privileges to run (e.g., must be run with `sudo`) to 
     - [x] View the journalctl logs for a specific systemctl process, user can optionally specify the number of recent log entries to display; the default is 100.entries for analysis.
 - [x] `traceroute`
     - [x] Traceroute
-
+- [x] `diagnostics`
+    - [x] System Diagnostics
+        - [x] View the last 100 error entries in journalctl
+        - [x] View the last 100 error entries in /var/log/syslog
+        - [x] View the last 50 entries in dmesg (kernel ring buffer)
+        - [x] last / lastb: View recent user login history and failed login attempts (possible brute-force attacks), last 10 entries
 ## Cache
 
 When the -D flag is used to define the cache path, the caching feature is enabled. Every MCP tool output is automatically saved to the cache file. The cache content is stored in the `cache.db` file in the defined path. The structure of `cache.db` is as follows: 
