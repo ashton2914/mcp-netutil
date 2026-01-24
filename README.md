@@ -34,7 +34,8 @@ paste below content
 
 ```ini
 [Unit]
-Description=mcp-netutil (System Mode)
+Description=mcp-netutil
+Documentation=https://github.com/ashton2914/mcp-netutil
 After=network.target
 
 [Service]
