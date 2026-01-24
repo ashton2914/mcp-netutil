@@ -2,8 +2,10 @@
 
 ## Run
 
-```
-./mcp-netutil [FLAG] [PARAMETER]
+**Note: This program requires root privileges.**
+
+```bash
+sudo ./mcp-netutil [FLAG] [PARAMETER]
 ```
 
 FLAG
@@ -14,48 +16,44 @@ FLAG
 
 ## Deploy on your server
 
-Recommend runing under user mode and use systemd user mode to control it
+Recommend running under systemd.
 
 ```bash
-mkdir -p ~/mcp/share/mcp-netutil/ && \
-cd ~/mcp/ && \
-wget -O mcp-netutil https://github.com/ashton2914/mcp-netutil/releases/latest/download/mcp-netutil-linux-amd64 && \
-chmod +x mcp-netutil && \
+sudo mkdir -p /opt/mcp-netutil/ && \
+cd /opt/mcp-netutil/ && \
+sudo wget -O mcp-netutil https://github.com/ashton2914/mcp-netutil/releases/latest/download/mcp-netutil-linux-amd64 && \
+sudo chmod +x mcp-netutil && \
 cd -
 ```
 
 ```bash
-mkdir -p ~/.config/systemd/user/ && \
-nano ~/.config/systemd/user/mcp-netutil.service
+sudo nano /etc/systemd/system/mcp-netutil.service
 ```
 
 paste below content
 
 ```ini
 [Unit]
-Description=mcp-netutil(User Mode)
+Description=mcp-netutil (System Mode)
 After=network.target
 
 [Service]
-# Ensure the path is absolute
-ExecStart=%h/mcp/mcp-netutil -a 127.0.0.1 -p 20000
-Restart=always
-RestartSec=3
+Type=simple
+User=root
+WorkingDirectory=/opt/mcp-netutil
+ExecStart=/opt/mcp-netutil/mcp-netutil -a 127.0.0.1 -p 20000 -D /opt/mcp-netutil
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 ```
 
 ```bash
-sudo loginctl enable-linger $USER
-```
-
-```
-systemctl --user daemon-reload
-systemctl --user start mcp-netutil
-systemctl --user enable mcp-netutil
-systemctl --user status mcp-netutil
-journalctl --user -u mcp-netutil -f
+sudo systemctl daemon-reload
+sudo systemctl start mcp-netutil
+sudo systemctl enable mcp-netutil
+sudo systemctl status mcp-netutil
 ```
 
 ## Nginx 

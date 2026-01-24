@@ -39,83 +39,42 @@ func Init(dir string) error {
 }
 
 func createTables() error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS latency_records (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp TEXT,
-			target TEXT,
-			mode TEXT,
-			result TEXT
-		)`,
-		`CREATE TABLE IF NOT EXISTS traceroute_records (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp TEXT,
-			target TEXT,
-			result TEXT
-		)`,
-		`CREATE TABLE IF NOT EXISTS system_stats_records (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp TEXT,
-			result TEXT
-		)`,
-	}
+	query := `CREATE TABLE IF NOT EXISTS records (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp TEXT,
+		tool_name TEXT,
+		mcp_output TEXT
+	)`
 
-	for _, query := range queries {
-		if _, err := DB.Exec(query); err != nil {
-			return err
-		}
+	if _, err := DB.Exec(query); err != nil {
+		return err
 	}
 	return nil
 }
 
-// RecordLatency saves a latency check result
-func RecordLatency(target, mode, result string) error {
+// SaveRecord saves a tool execution record
+func SaveRecord(toolName, output string) error {
 	if DB == nil {
 		return nil
 	}
-	_, err := DB.Exec("INSERT INTO latency_records (timestamp, target, mode, result) VALUES (?, ?, ?, ?)", LocalTimeNow(), target, mode, result)
-	return err
-}
-
-// RecordTraceroute saves a traceroute result
-func RecordTraceroute(target, result string) error {
-	if DB == nil {
-		return nil
-	}
-	_, err := DB.Exec("INSERT INTO traceroute_records (timestamp, target, result) VALUES (?, ?, ?)", LocalTimeNow(), target, result)
-	return err
-}
-
-// RecordSystemStats saves system statistics
-func RecordSystemStats(result string) error {
-	if DB == nil {
-		return nil
-	}
-	_, err := DB.Exec("INSERT INTO system_stats_records (timestamp, result) VALUES (?, ?)", LocalTimeNow(), result)
+	// mcp_output is the raw JSON string
+	_, err := DB.Exec("INSERT INTO records (timestamp, tool_name, mcp_output) VALUES (?, ?, ?)", LocalTimeNow(), toolName, output)
 	return err
 }
 
 // QueryRecords retrieves records based on criteria
-func QueryRecords(tool string, startTime, endTime, target string) ([]map[string]interface{}, error) {
+func QueryRecords(toolName, startTime, endTime string) ([]map[string]interface{}, error) {
 	if DB == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	var tableName string
-	switch tool {
-	case "latency":
-		tableName = "latency_records"
-	case "traceroute":
-		tableName = "traceroute_records"
-	case "system_stats":
-		tableName = "system_stats_records"
-	default:
-		return nil, fmt.Errorf("unknown tool: %s", tool)
-	}
-
-	query := fmt.Sprintf("SELECT * FROM %s WHERE 1=1", tableName)
+	query := "SELECT timestamp, tool_name, mcp_output FROM records WHERE 1=1"
 	var args []interface{}
 
+	if toolName != "" {
+		query += " AND tool_name = ?"
+		args = append(args, toolName)
+	}
 	if startTime != "" {
 		query += " AND timestamp >= ?"
 		args = append(args, startTime)
@@ -123,10 +82,6 @@ func QueryRecords(tool string, startTime, endTime, target string) ([]map[string]
 	if endTime != "" {
 		query += " AND timestamp <= ?"
 		args = append(args, endTime)
-	}
-	if target != "" && tool != "system_stats" {
-		query += " AND target LIKE ?"
-		args = append(args, "%"+target+"%")
 	}
 
 	query += " ORDER BY timestamp DESC"
