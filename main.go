@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync"
+	"time"
 
 	mcp_cache "github.com/ashton2914/mcp-netutil/pkg/cache"
 	"github.com/ashton2914/mcp-netutil/pkg/latency"
@@ -32,7 +34,12 @@ func main() {
 	addr := flag.String("a", "", "listen address")
 	p := flag.String("p", "", "listen port")
 	cacheDir := flag.String("D", "", "Enable cache and define cache directory")
+	verbose := flag.Bool("v", false, "Enable verbose logging")
 	flag.Parse()
+
+	if *verbose {
+		enableDebugLog = true
+	}
 
 	// 2.1 Initialize Cache if requested
 	if *cacheDir != "" {
@@ -193,40 +200,75 @@ func startStdioServer(server *mcp.Server) {
 			continue
 		}
 
+		if enableDebugLog {
+			log.Printf("[DEBUG] Stdio Request: %+v", req)
+		}
+
 		resp := server.HandleRequest(req)
+
+		if enableDebugLog {
+			log.Printf("[DEBUG] Stdio Response: %+v", resp)
+		}
+
 		respBytes, _ := json.Marshal(resp)
 		fmt.Println(string(respBytes))
 	}
 }
 
+var enableDebugLog bool
+
+func debugLog(format string, v ...interface{}) {
+	if enableDebugLog {
+		log.Printf("[DEBUG] "+format, v...)
+	}
+}
+
+// SessionManager manages SSE client sessions
+type SessionManager struct {
+	clients map[chan mcp.JSONRPCResponse]bool
+	lock    sync.RWMutex
+}
+
+func NewSessionManager() *SessionManager {
+	return &SessionManager{
+		clients: make(map[chan mcp.JSONRPCResponse]bool),
+	}
+}
+
+func (sm *SessionManager) Add(ch chan mcp.JSONRPCResponse) {
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
+	sm.clients[ch] = true
+	debugLog("New SSE client connected, total clients: %d", len(sm.clients))
+}
+
+func (sm *SessionManager) Remove(ch chan mcp.JSONRPCResponse) {
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
+	if _, ok := sm.clients[ch]; ok {
+		delete(sm.clients, ch)
+		close(ch)
+		debugLog("SSE client disconnected, total clients: %d", len(sm.clients))
+	}
+}
+
+func (sm *SessionManager) Broadcast(resp mcp.JSONRPCResponse) {
+	sm.lock.RLock()
+	defer sm.lock.RUnlock()
+
+	debugLog("Broadcasting message to %d clients", len(sm.clients))
+	for ch := range sm.clients {
+		select {
+		case ch <- resp:
+		case <-time.After(100 * time.Millisecond):
+			debugLog("Warning: Dropped message for slow client")
+		}
+	}
+}
+
 func startSSEServer(server *mcp.Server, addr, port string) {
-	// Simple SSE/HTTP implementation for MCP
-	// /sse -> Establishing connection
-	// /message -> Receiving messages (POST)
-
-	// Since MCP over SSE typically requires tracking sessions and providing an endpoint for POST,
-	// implementing a full compliant one in one file without a library is tricky.
-	// However, standard says:
-	// GET /sse -> return text/event-stream
-	// The client receives an endpoint event to know where to POST messages.
-
-	// For simplicity, we'll implement a basic loop.
-	// NOTE: This implementation might need refinement for multiple concurrent clients.
-
 	mux := http.NewServeMux()
-
-	// Simple message channel map for sessions could be implemented here,
-	// but for this task, let's assume one active session or basic broadcast?
-	// Actually better to just support basic POST for RPC if using simple HTTP,
-	// but MCP requires SSE for server->client notifications usually.
-	// Since we don't have server->client notifications (sampling etc) yet,
-	// maybe we can just use HTTP POST for request/response?
-	// README mentions: "use the following configuration to connect via SSE: ... serverUrl: https://yourserver/sse"
-	// So it expects SSE.
-
-	// Let's implement a very basic SSE endpoint.
-
-	msgCh := make(chan mcp.JSONRPCResponse)
+	sessionMgr := NewSessionManager()
 
 	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -234,15 +276,38 @@ func startSSEServer(server *mcp.Server, addr, port string) {
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
+		// Buffer channel slightly to avoid dropping immediately on bursts
+		msgCh := make(chan mcp.JSONRPCResponse, 5)
+		sessionMgr.Add(msgCh)
+		defer sessionMgr.Remove(msgCh)
+
 		// Send endpoint event
 		fmt.Fprintf(w, "event: endpoint\ndata: /message\n\n")
 		w.(http.Flusher).Flush()
 
 		// Stream responses
-		for resp := range msgCh {
-			data, _ := json.Marshal(resp)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			w.(http.Flusher).Flush()
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case resp, ok := <-msgCh:
+				if !ok {
+					return
+				}
+				data, _ := json.Marshal(resp)
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+					return
+				}
+				w.(http.Flusher).Flush()
+			case <-ticker.C:
+				if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
+					return
+				}
+				w.(http.Flusher).Flush()
+			case <-r.Context().Done():
+				return
+			}
 		}
 	})
 
@@ -258,10 +323,17 @@ func startSSEServer(server *mcp.Server, addr, port string) {
 			return
 		}
 
+		if enableDebugLog {
+			log.Printf("[DEBUG] HTTP POST /message Request: %+v", req)
+		}
+
 		// Handle asynchronously
 		go func() {
 			resp := server.HandleRequest(req)
-			msgCh <- resp
+			if enableDebugLog {
+				log.Printf("[DEBUG] HTTP POST /message Response: %+v", resp)
+			}
+			sessionMgr.Broadcast(resp)
 		}()
 
 		w.WriteHeader(http.StatusAccepted)
