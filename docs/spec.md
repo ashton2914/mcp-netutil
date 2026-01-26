@@ -43,6 +43,7 @@ This program requires root privileges to run (e.g., must be run with `sudo`) to 
         - [x] View the last 100 error entries in /var/log/syslog
         - [x] View the last 50 entries in dmesg (kernel ring buffer)
         - [x] last / lastb: View recent user login history and failed login attempts (possible brute-force attacks), last 10 entries
+
 ## Cache
 
 When the -D flag is used to define the cache path, the caching feature is enabled. Every MCP tool output is automatically saved to the cache file. The cache content is stored in the `cache.db` file in the defined path. The structure of `cache.db` is as follows: 
@@ -51,3 +52,17 @@ When the -D flag is used to define the cache path, the caching feature is enable
     - `timestamp`
     - `tool_name` MCP tool name
     - `mcp_output` (JSON structured text, utilizing the MCP output text directly)
+
+## Auth
+
+If `-o "you_api_key"` is specified to set a key, the client must use the path "domain/sse/you_api_key" to access the service.
+
+API Key Standard:
+- Includes the prefix sk-netutil-
+- Followed by a 32-character string
+
+Users can use `./mcp-netutil --generate_key` to generate an API key that meets these standards.
+
+## Help
+
+Users can use the input parameters `-h` or `--help` to display the available input parameters.

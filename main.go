@@ -3,13 +3,16 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,12 +27,9 @@ import (
 )
 
 func main() {
-	// 1. Platform & Privilege Check
+	// 1. Platform Check
 	if runtime.GOOS != "linux" {
 		log.Fatal("This program only supports Linux systems.")
-	}
-	if os.Geteuid() != 0 {
-		log.Fatal("This program must be run as root.")
 	}
 
 	// 2. Parse Flags
@@ -37,7 +37,31 @@ func main() {
 	p := flag.String("p", "", "listen port")
 	cacheDir := flag.String("D", "", "Enable cache and define cache directory")
 	verbose := flag.Bool("v", false, "Enable verbose logging")
+	apiKey := flag.String("o", "", "Set API key for authentication")
+	genKey := flag.Bool("generate_key", false, "Generate a standard API key")
 	flag.Parse()
+
+	// 2.0 Handle Key Generation
+	if *genKey {
+		key, err := generateAPIKey()
+		if err != nil {
+			log.Fatalf("Failed to generate key: %v", err)
+		}
+		fmt.Println(key)
+		os.Exit(0)
+	}
+
+	// 3. Privilege Check (Required for actual operation)
+	if os.Geteuid() != 0 {
+		log.Fatal("This program must be run as root.")
+	}
+
+	// 2.0.1 Validate API Key if provided
+	if *apiKey != "" {
+		if !isValidAPIKey(*apiKey) {
+			log.Fatal("Invalid API key format. Must start with 'sk-netutil-' followed by 32 characters.")
+		}
+	}
 
 	if *verbose {
 		enableDebugLog = true
@@ -297,10 +321,35 @@ func main() {
 
 	// 5. Start Server
 	if *addr != "" && *p != "" {
-		startSSEServer(server, *addr, *p)
+		startSSEServer(server, *addr, *p, *apiKey)
 	} else {
 		startStdioServer(server)
 	}
+}
+
+func generateAPIKey() (string, error) {
+	const prefix = "sk-netutil-"
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	length := 32
+	b := make([]byte, length)
+	for i := range b {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = charset[num.Int64()]
+	}
+	return prefix + string(b), nil
+}
+
+func isValidAPIKey(key string) bool {
+	if !strings.HasPrefix(key, "sk-netutil-") {
+		return false
+	}
+	if len(key) != len("sk-netutil-")+32 {
+		return false
+	}
+	return true
 }
 
 func startStdioServer(server *mcp.Server) {
@@ -383,11 +432,16 @@ func (sm *SessionManager) Broadcast(resp mcp.JSONRPCResponse) {
 	}
 }
 
-func startSSEServer(server *mcp.Server, addr, port string) {
+func startSSEServer(server *mcp.Server, addr, port, apiKey string) {
 	mux := http.NewServeMux()
 	sessionMgr := NewSessionManager()
 
-	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+	ssePath := "/sse"
+	if apiKey != "" {
+		ssePath = fmt.Sprintf("/sse/%s", apiKey)
+	}
+
+	mux.HandleFunc(ssePath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")

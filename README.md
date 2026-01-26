@@ -8,10 +8,7 @@
 sudo ./mcp-netutil [FLAG] [PARAMETER]
 ```
 
-FLAG
-- `-a` listen address
-- `-p` listen port
-- `-D` Enable cache and define cache directory
+use `./mcp-netutil --help` for help
 
 
 ## Deploy on your server
@@ -42,7 +39,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/mcp-netutil
-ExecStart=/opt/mcp-netutil/mcp-netutil -a 127.0.0.1 -p 20000 -D /opt/mcp-netutil
+ExecStart=/opt/mcp-netutil/mcp-netutil -a 127.0.0.1 -p 20000 -D /opt/mcp-netutil -o "you_api_key"
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 
@@ -76,16 +73,13 @@ server {
 }
 ```
 
-
-## VSCode Configuration
-
-If you have deployed the server on a remote machine (e.g. `yourserverip:20000`), use the following configuration to connect via SSE:
+## Clinet Configuration
 
 ```json
 {
   "mcpServers": {
     "mcp-netutil": {
-      "serverUrl": "https://yourserver/sse"
+      "serverUrl": "https://yourserver/sse/you_api_key"
     }
   }
 }
